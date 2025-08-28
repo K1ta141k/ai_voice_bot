@@ -1,0 +1,12 @@
+discord.py~=2.3
+python-dotenv~=1.0
+openai~=1.12
+
+# LangGraph compatibility block
+# langgraph 0.0.69 requires langchain-core >=0.2,<0.3
+# We pin langchain packages accordingly to avoid resolver conflicts.
+langgraph==0.0.69
+# Compatible langchain package versions (<0.3) that exist on PyPI
+langchain==0.2.17            # brings its own compatible langchain-core 0.2.x
+langchain-core==0.2.43
+langchain-community==0.2.4

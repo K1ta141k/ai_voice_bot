@@ -1,6 +1,11 @@
-discord.py~=2.3
+discord.py>=2.3.0
 python-dotenv~=1.0
-openai~=1.12
+PyNaCl>=1.3.0
+websockets>=12.0
+asyncio
+openai>=1.50.0
+numpy
+requests>=2.31.0
 
 # LangGraph compatibility block
 # langgraph 0.0.69 requires langchain-core >=0.2,<0.3
@@ -10,3 +15,4 @@ langgraph==0.0.69
 langchain==0.2.17            # brings its own compatible langchain-core 0.2.x
 langchain-core==0.2.43
 langchain-community==0.2.4
+langchain-openai==0.1.25

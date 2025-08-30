@@ -13,3 +13,11 @@ venv/
 
 # Mac
 .DS_Store
+
+# Audio logs and session files
+audio_logs/
+conversation_log.jsonl
+messages_log.jsonl
+
+# Project documentation (keep in repo but don't track changes)
+CLAUDE.md

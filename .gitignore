@@ -19,5 +19,8 @@ audio_logs/
 conversation_log.jsonl
 messages_log.jsonl
 
+# Playground folder for AI file operations
+playground/
+
 # Project documentation (keep in repo but don't track changes)
 CLAUDE.md

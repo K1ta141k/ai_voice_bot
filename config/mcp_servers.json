@@ -1,0 +1,111 @@
+{
+  "servers": {
+    "playwright": {
+      "name": "Playwright MCP Server",
+      "description": "Browser automation and web scraping with video recording",
+      "enabled": true,
+      "connection": {
+        "type": "stdio",
+        "command": "node",
+        "args": ["../playwright_mcp/src/index.js"],
+        "cwd": "./config",
+        "timeout": 30000
+      },
+      "capabilities": [
+        "browser_automation",
+        "web_scraping", 
+        "video_recording",
+        "screenshot_capture",
+        "form_filling",
+        "navigation"
+      ],
+      "security": {
+        "sandbox": true,
+        "headless_default": true,
+        "allowed_domains": "*",
+        "max_pages_per_session": 10
+      },
+      "settings": {
+        "default_browser": "chromium",
+        "video_recording": true,
+        "video_dir": "../playground/browser_recordings",
+        "screenshot_dir": "../playground/screenshots"
+      }
+    },
+    "filesystem": {
+      "name": "Filesystem MCP Server",
+      "description": "File operations with enhanced security",
+      "enabled": false,
+      "connection": {
+        "type": "stdio",
+        "command": "filesystem-mcp-server",
+        "args": ["--root", "../playground"],
+        "timeout": 10000
+      },
+      "capabilities": [
+        "read_file",
+        "write_file",
+        "list_directory",
+        "create_directory",
+        "delete_file"
+      ],
+      "security": {
+        "sandbox": true,
+        "allowed_paths": ["../playground/**"],
+        "denied_paths": ["../.env", "../config/**", "../src/**"],
+        "max_file_size": "10MB"
+      }
+    },
+    "web_api": {
+      "name": "Web API MCP Server", 
+      "description": "REST API interactions and webhook handling",
+      "enabled": false,
+      "connection": {
+        "type": "http",
+        "host": "localhost",
+        "port": 8080,
+        "protocol": "http",
+        "timeout": 15000
+      },
+      "capabilities": [
+        "http_requests",
+        "api_calls",
+        "webhook_handling",
+        "json_processing"
+      ],
+      "security": {
+        "rate_limit": "100/hour",
+        "allowed_hosts": [],
+        "require_auth": false
+      }
+    }
+  },
+  "global_settings": {
+    "max_concurrent_connections": 5,
+    "connection_retry_attempts": 3,
+    "connection_retry_delay": 2000,
+    "health_check_interval": 30000,
+    "log_level": "INFO",
+    "enable_tool_discovery": true,
+    "tool_execution_timeout": 60000,
+    "sandbox_mode": true
+  },
+  "permissions": {
+    "_suiman": {
+      "allowed_servers": ["*"],
+      "allowed_capabilities": ["*"],
+      "rate_limits": {
+        "requests_per_minute": 60,
+        "concurrent_operations": 5
+      }
+    },
+    "default": {
+      "allowed_servers": [],
+      "allowed_capabilities": [],
+      "rate_limits": {
+        "requests_per_minute": 10,
+        "concurrent_operations": 2
+      }
+    }
+  }
+}

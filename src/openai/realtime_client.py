@@ -8,6 +8,7 @@ import numpy as np
 import discord
 import io
 from ..audio.manager import AudioManager
+from .function_calling import FunctionCallingHandler
 
 
 class OpenAIRealtime:
@@ -23,6 +24,15 @@ class OpenAIRealtime:
         self.response_complete = False
         self.is_streaming_audio = False
         self.streaming_audio_source = None
+        self.function_handler = FunctionCallingHandler()
+        # Ensure tools are discovered
+        self.function_handler.tool_manager.registry.discover_tools()
+        print(f"🔍 Discovered {len(self.function_handler.tool_manager.registry.list_tools())} tools for voice AI")
+        self.tools_enabled = True
+        self.current_user_id = None
+        self.current_channel_id = None
+        self.response_in_progress = False
+        self.last_response_id = None
         
     async def connect(self):
         """Connect to OpenAI Realtime API"""
@@ -42,15 +52,36 @@ class OpenAIRealtime:
                 "type": "session.update",
                 "session": {
                     "modalities": ["text", "audio"],
-                    "instructions": "You are a helpful AI assistant in a Discord voice chat. Keep responses conversational and natural. Respond with voice when possible.",
+                    "instructions": "You are a helpful AI assistant in a Discord voice chat. Keep responses conversational and natural. Respond with voice when possible. You have access to various tools that you can use to help users. CRITICAL RULE: You MUST ALWAYS respond in English only. Even if the user speaks in Spanish, Portuguese, French, or any other language, you MUST respond in English. Never use any language other than English in your responses. This is a strict requirement that cannot be overridden.",
                     "voice": "alloy",
                     "input_audio_format": "pcm16",
                     "output_audio_format": "pcm16",
                     "input_audio_transcription": {
                         "model": "whisper-1"
+                    },
+                    "turn_detection": {
+                        "type": "server_vad",
+                        "threshold": 0.5,
+                        "prefix_padding_ms": 300,
+                        "silence_duration_ms": 500
+                    },
+                    "conversation": {
+                        "language": "en-US"
                     }
                 }
             }
+            
+            # Add tools if enabled
+            if self.tools_enabled:
+                tools = self.function_handler.get_function_definitions(self.current_user_id)
+                print(f"🔧 Registering {len(tools)} tools with OpenAI Realtime API")
+                if tools:
+                    session_config["session"]["tools"] = tools
+                    # Log tool names for debugging
+                    tool_names = [tool.get("function", {}).get("name", "unknown") for tool in tools]
+                    print(f"🔧 Available tools: {', '.join(tool_names)}")
+                else:
+                    print("⚠️  No tools available for registration with OpenAI")
             
             await self.ws.send(json.dumps(session_config))
             self.is_connected = True
@@ -63,6 +94,19 @@ class OpenAIRealtime:
             print(f"❌ Failed to connect to OpenAI: {e}")
             self.is_connected = False
             
+    def set_user_context(self, user_id: str, channel_id: str = None):
+        """Set current user context for tool execution."""
+        self.current_user_id = user_id
+        self.current_channel_id = channel_id
+    
+    def enable_tools(self, enabled: bool = True):
+        """Enable or disable tool functionality."""
+        self.tools_enabled = enabled
+        if enabled:
+            print("🔧 Tools enabled for voice interactions")
+        else:
+            print("🚫 Tools disabled for voice interactions")
+    
     async def send_voice_message(self, audio_data, duration):
         """Send voice message to OpenAI"""
         if not self.is_connected:
@@ -94,7 +138,12 @@ class OpenAIRealtime:
             
             # Commit and request response
             await self.ws.send(json.dumps({"type": "input_audio_buffer.commit"}))
-            await self.ws.send(json.dumps({"type": "response.create"}))
+            
+            if not self.response_in_progress:
+                await self.ws.send(json.dumps({"type": "response.create"}))
+                self.response_in_progress = True
+            else:
+                print("⚠️  Response already in progress, skipping duplicate request")
             
             print(f"📤 Sent {duration:.1f}s voice message to OpenAI")
             
@@ -152,6 +201,7 @@ class OpenAIRealtime:
                     
             elif message_type == "response.audio.done":
                 # Audio streaming complete - play and save
+                self.response_in_progress = False  # Reset response state
                 if self.current_response_audio:
                     combined_audio = np.concatenate(self.current_response_audio)
                     
@@ -182,12 +232,89 @@ class OpenAIRealtime:
                 if text:
                     self.current_response_text += text
                     print(f"🤖 AI: {text}", end="")
+            
+            elif message_type == "response.function_call_arguments.delta":
+                # Handle function call arguments streaming
+                print(f"🔧 Function call arguments: {data.get('delta', '')}", end="")
+            
+            elif message_type == "response.function_call_arguments.done":
+                # Function call ready for execution
+                await self.handle_function_call_complete(data)
+            
+            elif message_type == "response.output_item.added":
+                # New output item added (could be function call)
+                item = data.get("item", {})
+                if item.get("type") == "function_call":
+                    print(f"🔧 Function call initiated: {item.get('name', 'unknown')}")
                     
             elif message_type == "error":
-                print(f"❌ OpenAI Error: {data}")
+                error_info = data.get("error", {})
+                error_code = error_info.get("code", "unknown")
+                error_message = error_info.get("message", "Unknown error")
+                
+                if error_code == "input_audio_buffer_commit_empty":
+                    print(f"⚠️  OpenAI: Audio buffer too small, skipping response generation")
+                    self.response_in_progress = False  # Reset state on buffer error
+                elif error_code == "conversation_already_has_active_response":
+                    print(f"⚠️  OpenAI: Response already in progress, ignoring duplicate request")
+                    # Don't reset state here as response is actually in progress
+                else:
+                    print(f"❌ OpenAI Error [{error_code}]: {error_message}")
+                    print(f"🔍 Full error data: {data}")
+                    self.response_in_progress = False  # Reset state on other errors
                 
         except Exception as e:
             print(f"❌ Error handling OpenAI message: {e}")
+    
+    async def handle_function_call_complete(self, data):
+        """Handle completed function call."""
+        try:
+            item = data.get("item", {})
+            function_name = item.get("name", "")
+            arguments = item.get("arguments", "")
+            call_id = item.get("call_id", "")
+            
+            print(f"\n🔧 Executing function: {function_name}")
+            
+            # Execute the function call
+            result = await self.function_handler.handle_function_call(
+                function_name,
+                arguments,
+                self.current_user_id,
+                self.current_channel_id
+            )
+            
+            # Send result back to OpenAI
+            function_result = {
+                "type": "conversation.item.create",
+                "item": {
+                    "type": "function_call_output",
+                    "call_id": call_id,
+                    "output": json.dumps({
+                        "success": result.success,
+                        "data": result.data or {},
+                        "error": result.error,
+                        "message": result.message
+                    })
+                }
+            }
+            
+            await self.ws.send(json.dumps(function_result))
+            
+            # Request response generation
+            if not self.response_in_progress:
+                await self.ws.send(json.dumps({"type": "response.create"}))
+                self.response_in_progress = True
+            else:
+                print("⚠️  Response already in progress after function call, skipping duplicate request")
+            
+            if result.success:
+                print(f"✅ Function {function_name} executed successfully")
+            else:
+                print(f"❌ Function {function_name} failed: {result.error}")
+            
+        except Exception as e:
+            print(f"❌ Error handling function call: {e}")
             
     async def play_audio_response(self, audio_data):
         """Play audio response through Discord"""
@@ -329,10 +456,16 @@ class OpenAIRealtime:
     async def disconnect(self):
         """Gracefully close the websocket connection to OpenAI Realtime"""
         try:
-            if self.ws and not self.ws.closed:
-                await self.ws.close()
+            if self.ws:
+                # Check if websocket has 'closed' attribute and is not closed
+                if hasattr(self.ws, 'closed') and not self.ws.closed:
+                    await self.ws.close()
+                elif hasattr(self.ws, 'close'):
+                    # Fallback for different websocket implementations
+                    await self.ws.close()
                 print("🔌 Disconnected from OpenAI Realtime API")
         except Exception as e:
             print(f"❌ Error during OpenAI disconnect: {e}")
         finally:
             self.is_connected = False
+            self.ws = None

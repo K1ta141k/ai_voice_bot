@@ -156,10 +156,3 @@ The modular architecture makes it easy to extend:
 
 Use push-to-talk mode (`!talk start/stop`) for reliable testing without automatic detection.
 
-## License
-
-[Add your license information here]
-
-## Contributing
-
-[Add contributing guidelines here]
